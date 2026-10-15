@@ -1,0 +1,14 @@
+{
+  "name": "reviews",
+  "version": "1.0.0",
+  "description": "The reviews Web App: product reviews, behind API Management",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0"
+}
