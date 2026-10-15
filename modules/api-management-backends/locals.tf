@@ -4,7 +4,7 @@ locals {
   function_apps = toset(["catalog", "orders"])
 
   # The reviews Web App's code, in app/reviews, hashed the same way.
-  reviews_dir  = "${path.module}/../../app/reviews"
+  reviews_dir = "${path.module}/../../app/reviews"
   reviews_hash = substr(sha1(join(",", [
     for f in sort(fileset(local.reviews_dir, "**")) : "${f}:${filesha1("${local.reviews_dir}/${f}")}"
   ])), 0, 12)
