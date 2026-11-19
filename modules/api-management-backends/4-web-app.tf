@@ -33,7 +33,7 @@ resource "azurerm_linux_web_app" "reviews" {
 
   site_config {
     application_stack {
-      node_version = "22-lts"
+      node_version = "26"
     }
   }
 
