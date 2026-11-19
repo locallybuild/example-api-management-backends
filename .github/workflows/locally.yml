@@ -1,0 +1,126 @@
+# Deploys this example to Locally the same way its README does, then tears it
+# down again - so a change that stops the example deploying fails its PR.
+name: Locally
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: locally-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Locally
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required: Locally signs in using GitHub's OIDC token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      # Locally runs the functions with this Node.js, so it has to match the
+      # Function Apps' node_version.
+      - name: Find the Function Apps' Node.js version
+        id: node
+        run: |
+          version=$(grep -rhoE 'node_version\s*=\s*"[0-9]+"' --include='*.tf' modules | grep -oE '[0-9]+' | head -n1)
+          echo "version=${version:?no node_version found in modules}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+
+      # Locally hosts the function with the Azure Functions Core Tools. The
+      # npm package's `func` is a Node.js wrapper (lib/main.js) around the real
+      # binary in bin/, and Locally looks for the language workers next to
+      # whichever `func` is on PATH - so put bin/ (where workers/ lives) first.
+      - name: Install the Azure Functions Core Tools
+        run: |
+          npm install --global azure-functions-core-tools@4
+          bin="$(npm root --global)/azure-functions-core-tools/bin"
+          test -x "$bin/func" && test -d "$bin/workers"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Install the functions/catalog dependencies
+        working-directory: functions/catalog
+        run: npm install
+
+      - name: Install the functions/orders dependencies
+        working-directory: functions/orders
+        run: npm install
+
+      - uses: locallybuild/setup-locally@dc4fb46b46af5deded2a7e8ce1b6da7c337240f0 # v1.2.0
+        with:
+          team-uuid: ${{ vars.LOCALLY_TEAM_UUID }}
+          plugins: custom
+          plugins-list: |
+            Microsoft.ApiManagement
+            Microsoft.Insights
+            Microsoft.OperationalInsights
+            Microsoft.Storage
+            Microsoft.Web
+
+      - name: Apply environments/locally
+        id: apply0
+        working-directory: environments/locally
+        run: |
+          terraform init -input=false
+          locally run terraform apply -auto-approve -input=false
+
+      - name: Show why the deployment failed
+        if: failure() && steps.apply0.outcome == 'failure'
+        run: |
+          locally logs --json |
+            jq -r '.[] | select(.uri | test("/api/deployments/")) | .responseBody // empty | fromjson? | .status_text // empty' |
+            sort -u
+
+      # The same calls as the README: each app answers through the gateway,
+      # and the gateway refuses a call without a subscription key.
+      - name: Call the apps through the gateway
+        working-directory: environments/locally
+        run: |
+          set -euo pipefail
+          key="$(locally run terraform output -raw subscription_key)"
+          echo "::add-mask::$key"
+          products="$(locally run terraform output -raw products_url)"
+          orders="$(locally run terraform output -raw orders_url)"
+          reviews="$(locally run terraform output -raw reviews_url)"
+          call() { curl --silent --show-error --fail --cacert "$LOCALLY_TLS_CA_FILE_PATH" --header "Ocp-Apim-Subscription-Key: $key" "$@"; }
+
+          # The apps can take a little while to come up once deployed. Polled
+          # slowly, as each call counts towards the 20-a-minute rate limit.
+          for url in "$products" "$orders" "$reviews"; do
+            for _ in $(seq 30); do
+              call --output /dev/null "$url" 2>/dev/null && break
+              sleep 10
+            done
+          done
+
+          call "$products/mug" | jq -e '.via == "locally-example-apimback-apim"'
+          call --header 'Content-Type: application/json' --data '{"productId": "mug", "quantity": 2}' "$orders" | jq .
+          call "$orders" | jq -e 'tostring | test("mug")'
+          call --header 'Content-Type: application/json' --data '{"productId": "mug", "rating": 4, "text": "From CI."}' "$reviews" | jq .
+          call "$reviews?productId=mug" | jq -e 'tostring | test("From CI.")'
+
+          status="$(curl --silent --output /dev/null --write-out '%{http_code}' --cacert "$LOCALLY_TLS_CA_FILE_PATH" "$products")"
+          test "$status" = 401 || { echo "::error::expected a 401 without a subscription key, got $status"; exit 1; }
+
+      - name: Destroy environments/locally
+        # Only once there's something to destroy.
+        if: always() && steps.apply0.outcome != 'skipped'
+        working-directory: environments/locally
+        run: locally run terraform destroy -auto-approve -input=false
+
+      - uses: locallybuild/setup-locally/teardown@dc4fb46b46af5deded2a7e8ce1b6da7c337240f0 # v1.2.0
+        if: always()
