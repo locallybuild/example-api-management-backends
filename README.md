@@ -93,33 +93,33 @@ The Function Apps connect to nothing except their host storage (`AzureWebJobsSto
 
 ## Requirements
 
-* [Locally Build](https://locally.build) on the Standard plan or above, which the API Management gateway needs.
+* [Locally Build](https://locally.build). Using API Management needs the Standard plan or above.
 * Either [HashiCorp Terraform](https://terraform.io) or [OpenTofu](https://opentofu.org).
 * Either [Docker](https://www.docker.com) or [Podman](https://podman.io) (recommended).
-* [Node.js](https://nodejs.org) 24+, to install the functions' dependencies.
+* [Node.js](https://nodejs.org) 24, to install the functions' dependencies. Locally runs the functions with the Node.js on your machine, so its major version needs to match the Function Apps' `node_version`. The Web App runs on Node.js 26 in a container Locally starts for it, so it doesn't use yours.
 * [jq](https://jqlang.org), which some of the commands below use to read Terraform's JSON outputs.
 * The Locally Plugin for `Microsoft.ApiManagement` installed (`locally plugin install --name Microsoft.ApiManagement`).
+* The Locally Plugin for `Microsoft.Insights` installed (`locally plugin install --name Microsoft.Insights`).
+* The Locally Plugin for `Microsoft.OperationalInsights` installed (`locally plugin install --name Microsoft.OperationalInsights`).
 * The Locally Plugin for `Microsoft.Storage` installed (`locally plugin install --name Microsoft.Storage`).
 * The Locally Plugin for `Microsoft.Web` installed (`locally plugin install --name Microsoft.Web`).
-* The Locally Plugin for `Microsoft.OperationalInsights` installed (`locally plugin install --name Microsoft.OperationalInsights`).
-* The Locally Plugin for `Microsoft.Insights` installed (`locally plugin install --name Microsoft.Insights`).
 
 ## Running the example
 
-First, make sure your container runtime (Docker or Podman) is running, then start Locally:
+First up, we need to ensure our container runtime (Docker or Podman) is running, then launch Locally:
 
 ```bash
 locally build
 ```
 
-Each app is deployed from a zip that Terraform builds from its directory. The Function Apps' zips have to include their dependencies, so install those first (the Web App has none):
+Each app is deployed from a zip that Terraform builds from its directory. The Function Apps' zips have to include their dependencies, so we first install those (the Web App has none):
 
 ```bash
 (cd functions/catalog && npm install)
 (cd functions/orders && npm install)
 ```
 
-With Locally running, open another terminal and initialise Terraform. This downloads the providers and sets up the module:
+With Locally running, in another terminal we can initialise Terraform, which both downloads the providers we need and configures the module for use:
 
 ```bash
 cd environments/locally
@@ -127,9 +127,9 @@ terraform init
 ```
 
 > [!NOTE]
-> You can use OpenTofu instead by running `tofu` wherever this says `terraform`.
+> It's possible to use OpenTofu here by substituting `terraform` for `tofu`.
 
-Once Terraform is initialised, provision the example:
+With Terraform initialised, we can then provision the example by running:
 
 ```bash
 locally run terraform apply
@@ -201,7 +201,7 @@ curl -H "Ocp-Apim-Subscription-Key: $KEY" -H "Ocp-Apim-Trace: true" "$PRODUCTS"
 
 The trace is in the Requests page of the API Management instance's admin UI, at `https://locally-example-apimback-apim-admin.switchboard.locally:5670/_ui/requests`. Open the request to see each step: the policies that ran, the backend the request went to (with its `resource_id`), the credentials that backend added (by name, never their values), and the app's answer.
 
-The functions send their logs to a Log Analytics Workspace. You can query them in [the Monitoring section of the Locally Dashboard](https://localhost:5678/monitoring/components) by running:
+As this Terraform configuration sends the functions' logs into a Log Analytics Workspace, we can then query them within [the Locally Dashboard, in the Monitoring section](https://localhost:5678/monitoring/components), by running:
 
 ```
 FunctionAppLogs | order by TimeGenerated desc
